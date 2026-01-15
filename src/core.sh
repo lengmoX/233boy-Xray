@@ -12,6 +12,7 @@ protocol_list=(
     VLESS-gRPC-TLS
     VLESS-XHTTP-TLS
     VLESS-REALITY
+    VLESS-ENC
     # Trojan-H2-TLS
     Trojan-WS-TLS
     Trojan-gRPC-TLS
@@ -151,6 +152,20 @@ get_pbk() {
     is_public_key=${is_tmp_pbk[1]}
 }
 
+get_mlkem768() {
+    is_tmp_mlkem768=($($is_core_bin mlkem768 2>/dev/null | sed 's/.*://'))
+    is_mlkem_seed=${is_tmp_mlkem768[0]}
+    is_mlkem_client=${is_tmp_mlkem768[1]}
+}
+
+get_vless_enc() {
+    get_pbk
+    get_mlkem768
+    [[ ! $is_private_key || ! $is_public_key ]] && err "生成 X25519 密钥失败, 请更新 $is_core_name core."
+    [[ ! $is_mlkem_seed || ! $is_mlkem_client ]] && err "生成 ML-KEM-768 密钥失败, 请更新 $is_core_name core."
+    is_vless_enc_decryption="mlkem768x25519plus.xorpub.600s.${is_private_key}.${is_mlkem_seed}"
+    is_vless_enc_encryption="mlkem768x25519plus.xorpub.0rtt.${is_public_key}.${is_mlkem_client}"
+}
 show_list() {
     PS3=''
     COLUMNS=1
@@ -877,6 +892,11 @@ api() {
 # add a config
 add() {
     is_lower=${1,,}
+    is_vless_enc=
+    is_vless_enc_decryption=
+    is_vless_enc_encryption=
+    is_mlkem_seed=
+    is_mlkem_client=
     if [[ $is_lower ]]; then
         case $is_lower in
         # tcp | kcp | quic | tcpd | kcpd | quicd)
@@ -892,6 +912,9 @@ add() {
             ;;
         r | reality)
             is_new_protocol=VLESS-REALITY
+            ;;
+        vless | vless-enc | vless-enc*)
+            is_new_protocol=VLESS-ENC
             ;;
         ss)
             is_new_protocol=Shadowsocks
@@ -925,6 +948,12 @@ add() {
         is_use_uuid=$3
         is_use_path=$4
         is_add_opts="[host] [uuid] [/path]"
+        ;;
+    vless-enc*)
+        is_vless_enc=1
+        is_use_port=$2
+        is_use_uuid=$3
+        is_add_opts="[port] [uuid]"
         ;;
     vmess*)
         is_use_port=$2
@@ -1166,6 +1195,10 @@ add() {
         get install-caddy
     fi
 
+    if [[ $is_vless_enc ]]; then
+        get_vless_enc
+    fi
+
     # create json
     create server $is_new_protocol
 
@@ -1271,11 +1304,17 @@ get() {
             ;;
         vless*)
             is_protocol=vless
-            is_server_id_json='settings:{clients:[{id:"'$uuid'"}],decryption:"none"}'
-            is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"none"}]}]}'
+            [[ $is_lower == vless-enc* ]] && is_vless_enc=1
             if [[ $is_reality ]]; then
                 is_server_id_json='settings:{clients:[{id:"'$uuid'",flow:"xtls-rprx-vision"}],decryption:"none"}'
                 is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"none",flow:"xtls-rprx-vision"}]}]}'
+            elif [[ $is_vless_enc ]]; then
+                [[ ! $is_vless_enc_decryption || ! $is_vless_enc_encryption ]] && get_vless_enc
+                is_server_id_json='settings:{clients:[{id:"'$uuid'"}],decryption:"'$is_vless_enc_decryption'"}'
+                is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"'$is_vless_enc_encryption'"}]}]}'
+            else
+                is_server_id_json='settings:{clients:[{id:"'$uuid'"}],decryption:"none"}'
+                is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"none"}]}]}'
             fi
             ;;
         trojan*)
@@ -1319,7 +1358,7 @@ get() {
         esac
         [[ $net ]] && return # if net exist, dont need more json args
         case $is_lower in
-        *tcp* | *reality*)
+        *tcp* | *reality* | vless-enc*)
             net=tcp
             [[ ! $header_type ]] && header_type=none
             is_stream='tcpSettings:{header:{type:"'$header_type'"}}'
@@ -1497,8 +1536,10 @@ info() {
     tcp | kcp | quic)
         is_can_change=(0 1 5 7)
         is_info_show=(0 1 2 3 4 5)
-        is_vmess_url=$(jq -c '{v:2,ps:"'233boy-${net}-$is_addr'",add:"'$is_addr'",port:"'$port'",id:"'$uuid'",aid:"0",net:"'$net'",type:"'$header_type'",path:"'$kcp_seed'"}' <<<{})
-        is_url=vmess://$(echo -n $is_vmess_url | base64 -w 0)
+        [[ $is_protocol == 'vmess' ]] && {
+            is_vmess_url=$(jq -c '{v:2,ps:"'233boy-${net}-$is_addr'",add:"'$is_addr'",port:"'$port'",id:"'$uuid'",aid:"0",net:"'$net'",type:"'$header_type'",path:"'$kcp_seed'"}' <<<{})
+            is_url=vmess://$(echo -n $is_vmess_url | base64 -w 0)
+        }
         is_tmp_port=$port
         [[ $is_dynamic_port ]] && {
             is_can_change+=(12)
@@ -1576,6 +1617,11 @@ info() {
     done
     if [[ $is_new_install ]]; then
         warn "首次安装请查看脚本帮助文档: $(msg_ul https://233boy.com/$is_core/$is_core-script/)"
+    fi
+    if [[ $is_vless_enc_decryption && $is_vless_enc_encryption ]]; then
+        msg "------------- VLESS Encryption -------------"
+        msg "decryption: $is_vless_enc_decryption"
+        msg "encryption: $is_vless_enc_encryption"
     fi
     if [[ $is_url ]]; then
         msg "------------- ${info_list[12]} -------------"
@@ -1765,7 +1811,7 @@ main() {
         [[ $1 == 'no-auto-tls' ]] && is_no_auto_tls=1
         add ${@:2}
         ;;
-    api | bin | pbk | x25519 | tls | run | uuid)
+    api | bin | pbk | x25519 | tls | run | uuid | mlkem768)
         is_run_command=$1
         if [[ $1 == 'bin' ]]; then
             $is_core_bin ${@:2}
