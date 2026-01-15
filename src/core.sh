@@ -141,7 +141,7 @@ get_port() {
         if [[ $is_count -ge 233 ]]; then
             err "自动获取可用端口失败次数达到 233 次, 请检查端口占用情况."
         fi
-        tmp_port=$(shuf -i 445-65535 -n 1)
+        tmp_port=$(shuf -i 60000-65535 -n 1)
         [[ ! $(is_test port_used $tmp_port) && $tmp_port != $port ]] && break
     done
 }
@@ -311,7 +311,11 @@ ask() {
     set_change_list)
         is_tmp_list=()
         for v in ${is_can_change[@]}; do
-            is_tmp_list+=("${change_list[$v]}")
+            if [[ $v == 7 && $is_vless_enc ]]; then
+                is_tmp_list+=("重置 VLESS-ENC Decryption")
+            else
+                is_tmp_list+=("${change_list[$v]}")
+            fi
         done
         is_opt_msg="\n请选择更改:\n"
         is_ask_set=is_change_str
@@ -562,6 +566,7 @@ change() {
     } || {
         [[ $is_change_id ]] && {
             is_change_msg=${change_list[$is_change_id]}
+            [[ $is_change_id == 7 && $is_vless_enc ]] && is_change_msg="重置 VLESS-ENC Decryption"
             [[ $is_change_id == 'full' ]] && {
                 [[ $3 ]] && is_change_msg="更改多个参数" || is_change_msg=
             }
@@ -574,6 +579,7 @@ change() {
     [[ $host ]] && net=$is_protocol-$net-tls
     [[ $is_reality ]] && net=reality
     [[ $is_dynamic_port ]] && net=${net}d
+    [[ $is_vless_enc ]] && net=vless-enc
     [[ $3 == 'auto' ]] && is_auto=1
     # if is_dont_show_info exist, cant show info.
     is_dont_show_info=
@@ -662,21 +668,26 @@ change() {
         add $net auto auto $is_new_method
         ;;
     7)
-        # new header type
-        is_new_header_type=$3
-        [[ ! $header_type ]] && err "($is_config_file) 不支持更改伪装类型."
-        [[ $is_auto ]] && {
-            is_new_header_type=$is_random_header_type
-            if [[ $net == 'tcp' ]]; then
-                is_tmp_header_type=(none http)
-                is_new_header_type=${is_tmp_header_type[$(shuf -i 0-1 -n1)]}
-            fi
-        }
-        [[ ! $is_new_header_type ]] && {
-            ask set_header_type
-            is_new_header_type=$header_type
-        }
-        add $net auto auto $is_new_header_type
+        if [[ $is_vless_enc ]]; then
+            # reset vless-enc decryption
+            add vless-enc
+        else
+            # new header type
+            is_new_header_type=$3
+            [[ ! $header_type ]] && err "($is_config_file) 不支持更改伪装类型."
+            [[ $is_auto ]] && {
+                is_new_header_type=$is_random_header_type
+                if [[ $net == 'tcp' ]]; then
+                    is_tmp_header_type=(none http)
+                    is_new_header_type=${is_tmp_header_type[$(shuf -i 0-1 -n1)]}
+                fi
+            }
+            [[ ! $is_new_header_type ]] && {
+                ask set_header_type
+                is_new_header_type=$header_type
+            }
+            add $net auto auto $is_new_header_type
+        fi
         ;;
     8)
         # new remote addr
@@ -1522,13 +1533,15 @@ get() {
         json_str="$is_server_id_json,$is_stream"
         ;;
     dynamic-port) # create random dynamic port
-        if [[ $port -ge 60000 ]]; then
-            is_dynamic_port_end=$(shuf -i $(($port - 2333))-$port -n1)
-            is_dynamic_port_start=$(shuf -i $(($is_dynamic_port_end - 2333))-$is_dynamic_port_end -n1)
-        else
-            is_dynamic_port_start=$(shuf -i $port-$(($port + 2333)) -n1)
-            is_dynamic_port_end=$(shuf -i $is_dynamic_port_start-$(($is_dynamic_port_start + 2333)) -n1)
-        fi
+        is_count=0
+        while :; do
+            ((is_count++))
+            [[ $is_count -ge 233 ]] && err "自动获取动态端口失败次数达到 233 次, 请检查端口占用情况."
+            is_dynamic_port_start=$(shuf -i 60000-63202 -n1)
+            is_dynamic_port_end=$(($is_dynamic_port_start + 2333))
+            [[ $port -ge $is_dynamic_port_start && $port -le $is_dynamic_port_end ]] && continue
+            break
+        done
         is_dynamic_port_range="$is_dynamic_port_start-$is_dynamic_port_end"
         ;;
     dynamic-port-test) # test dynamic port
