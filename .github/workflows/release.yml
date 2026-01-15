@@ -22,6 +22,8 @@ jobs:
       #   run: |
       #     echo not found new version.
       #     exit 1
+      - name: normalize line endings
+        run: find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
       - name: zip
         run: zip -9vr code.zip . -x .\*
       - name: release

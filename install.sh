@@ -122,6 +122,14 @@ msg() {
     echo -e "${color}$(date +'%T')${none}) ${2}"
 }
 
+fix_eol() {
+    local root=$1
+    [[ -z $root || ! -d $root ]] && return
+    while IFS= read -r -d '' f; do
+        sed -i 's/\r$//' "$f"
+    done < <(find "$root" -type f -name "*.sh" -print0)
+}
+
 # show help msg
 show_help() {
     echo -e "Usage: $0 [-f xxx | -l | -p xxx | -v xxx | -h]"
@@ -388,6 +396,7 @@ main() {
     else
         unzip -qo $is_sh_ok -d $is_sh_dir
     fi
+    fix_eol "$is_sh_dir"
 
     # create core bin dir
     mkdir -p $is_core_dir/bin
