@@ -159,10 +159,24 @@ get_mlkem768() {
 }
 
 get_vless_enc() {
-    get_pbk
-    get_mlkem768
-    [[ ! $is_private_key || ! $is_public_key ]] && err "生成 X25519 密钥失败, 请更新 $is_core_name core."
-    [[ ! $is_mlkem_seed || ! $is_mlkem_client ]] && err "生成 ML-KEM-768 密钥失败, 请更新 $is_core_name core."
+    if [[ $is_use_x25519_private ]]; then
+        is_tmp_pbk=($($is_core_bin x25519 -i "$is_use_x25519_private" 2>/dev/null | sed 's/.*://'))
+        is_private_key=${is_tmp_pbk[0]}
+        is_public_key=${is_tmp_pbk[1]}
+        [[ ! $is_private_key || ! $is_public_key ]] && err "无效的 X25519 PrivateKey, 请重新输入."
+    else
+        get_pbk
+        [[ ! $is_private_key || ! $is_public_key ]] && err "生成 X25519 密钥失败, 请更新 $is_core_name core."
+    fi
+    if [[ $is_use_mlkem_seed ]]; then
+        is_tmp_mlkem768=($($is_core_bin mlkem768 -i "$is_use_mlkem_seed" 2>/dev/null | sed 's/.*://'))
+        is_mlkem_seed=${is_tmp_mlkem768[0]}
+        is_mlkem_client=${is_tmp_mlkem768[1]}
+        [[ ! $is_mlkem_seed || ! $is_mlkem_client ]] && err "无效的 ML-KEM-768 Seed, 请重新输入."
+    else
+        get_mlkem768
+        [[ ! $is_mlkem_seed || ! $is_mlkem_client ]] && err "生成 ML-KEM-768 密钥失败, 请更新 $is_core_name core."
+    fi
     is_vless_enc_decryption="mlkem768x25519plus.xorpub.600s.${is_private_key}.${is_mlkem_seed}"
     is_vless_enc_encryption="mlkem768x25519plus.xorpub.0rtt.${is_public_key}.${is_mlkem_client}"
 }
@@ -897,6 +911,8 @@ add() {
     is_vless_enc_encryption=
     is_mlkem_seed=
     is_mlkem_client=
+    is_use_x25519_private=
+    is_use_mlkem_seed=
     if [[ $is_lower ]]; then
         case $is_lower in
         # tcp | kcp | quic | tcpd | kcpd | quicd)
@@ -953,7 +969,9 @@ add() {
         is_vless_enc=1
         is_use_port=$2
         is_use_uuid=$3
-        is_add_opts="[port] [uuid]"
+        is_use_x25519_private=$4
+        is_use_mlkem_seed=$5
+        is_add_opts="[port] [uuid] [x25519_private | auto] [mlkem_seed | auto]"
         ;;
     vmess*)
         is_use_port=$2
@@ -1046,7 +1064,7 @@ add() {
 
     # prefer args.
     if [[ $2 ]]; then
-        for v in is_use_port is_use_uuid is_use_header_type is_use_host is_use_path is_use_pass is_use_method is_use_door_addr is_use_door_port is_use_dynamic_port_start is_use_dynamic_port_end; do
+        for v in is_use_port is_use_uuid is_use_header_type is_use_host is_use_path is_use_pass is_use_method is_use_door_addr is_use_door_port is_use_dynamic_port_start is_use_dynamic_port_end is_use_x25519_private is_use_mlkem_seed; do
             [[ ${!v} == 'auto' ]] && unset $v
         done
 

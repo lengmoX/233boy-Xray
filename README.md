@@ -16,6 +16,7 @@
 - 强大的快捷参数
 - 支持所有常用协议
 - 一键添加 VLESS-REALITY (默认)
+- 一键添加 VLESS-ENC (VLESS Encryption)
 - 一键添加 Shadowsocks 2022
 - 一键添加 VMess-(TCP/mKCP)
 - 一键添加 VMess-(WS/gRPC)-TLS
@@ -59,9 +60,12 @@ Usage: xray [options]... [args]...
    pbk                                             同等于 xray x25519
    get-port                                        返回一个可用的端口
    ss2022                                          返回一个可用于 Shadowsocks 2022 的密码
+   mlkem768                                        生成 ML-KEM-768 Seed/Client (VLESS Encryption)
 
 一般:
    a, add [protocol] [args... | auto]              添加配置
+   add vless [port] [uuid] [x25519_private | auto] [mlkem_seed | auto]
+   vless 参数说明: x25519_private/mlkem_seed 为 auto 则自动生成并匹配客户端
    c, change [name] [option] [args... | auto]      更改配置
    d, del [name]                                   删除配置**
    i, info [name]                                  查看配置
