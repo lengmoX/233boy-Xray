@@ -122,6 +122,6 @@ Usage: xray [options]... [args]...
    h, help                                         显示此帮助界面
 
 谨慎使用 del, ddel, 此选项会直接删除配置; 无需确认
-反馈问题) https://github.com/233boy/xray/issues
+反馈问题) https://github.com/lengmoX/233boy-Xray/issues
 文档(doc) https://233boy.com/xray/xray-script/
 ```

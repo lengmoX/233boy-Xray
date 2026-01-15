@@ -146,6 +146,23 @@ get_port() {
     done
 }
 
+get_high_port() {
+    is_count=0
+    while :; do
+        ((is_count++))
+        if [[ $is_count -ge 233 ]]; then
+            err "自动获取可用端口失败次数达到 233 次, 请检查端口占用情况."
+        fi
+        tmp_port=$(shuf -i 60000-65535 -n 1)
+        [[ ! $(is_test port_used $tmp_port) && $tmp_port != $port ]] && break
+    done
+}
+
+get_rand_alnum() {
+    local len=${1:-8}
+    LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$len"
+}
+
 get_pbk() {
     is_tmp_pbk=($($is_core_bin x25519 | sed 's/.*://'))
     is_private_key=${is_tmp_pbk[0]}
@@ -1180,7 +1197,15 @@ add() {
         if [[ $is_main_start ]]; then
 
             # set port
-            [[ ! $port ]] && ask string port "请输入端口:"
+            if [[ ! $port ]]; then
+                if [[ $is_new_protocol == 'Shadowsocks' || $is_new_protocol == 'Socks' ]]; then
+                    get_high_port
+                    is_default_arg=$tmp_port
+                    ask string port "请输入端口(回车自动生成):"
+                else
+                    ask string port "请输入端口:"
+                fi
+            fi
 
             case ${is_new_protocol,,} in
             *tcp* | *kcp* | *quic*)
@@ -1188,15 +1213,29 @@ add() {
                 ;;
             socks)
                 # set user
-                [[ ! $is_socks_user ]] && ask string is_socks_user "请设置用户名:"
+                if [[ ! $is_socks_user ]]; then
+                    is_default_arg=$(get_rand_alnum 8)
+                    ask string is_socks_user "请设置用户名(回车自动生成):"
+                fi
                 # set password
-                [[ ! $is_socks_pass ]] && ask string is_socks_pass "请设置密码:"
+                if [[ ! $is_socks_pass ]]; then
+                    is_default_arg=$(get_rand_alnum 8)
+                    ask string is_socks_pass "请设置密码(回车自动生成):"
+                fi
                 ;;
             shadowsocks)
                 # set method
                 [[ ! $ss_method ]] && ask set_ss_method
                 # set password
-                [[ ! $ss_password ]] && ask string ss_password "请设置密码:"
+                if [[ ! $ss_password ]]; then
+                    if [[ $(grep 2022 <<<$ss_method) ]]; then
+                        is_default_arg=$(get ss2022)
+                    else
+                        [[ ! $tmp_uuid ]] && get_uuid
+                        is_default_arg=$tmp_uuid
+                    fi
+                    ask string ss_password "请设置密码(回车自动生成):"
+                fi
                 ;;
             esac
             # set dynamic port
@@ -1629,6 +1668,8 @@ info() {
             is_info_str=($is_protocol $is_addr $port $uuid xtls-rprx-vision reality $is_servername "chrome" $is_public_key)
             is_url="$is_protocol://$uuid@$is_addr:$port?encryption=none&security=reality&flow=xtls-rprx-vision&type=tcp&sni=$is_servername&pbk=$is_public_key&fp=chrome#233boy-$net-$is_addr"
         elif [[ $is_protocol == 'vless' && $is_vless_enc && $net == 'tcp' && $is_vless_enc_encryption ]]; then
+            is_info_show=(0 1 2 3 4)
+            is_info_str=($is_protocol $is_addr "$is_tmp_port" $uuid $net)
             is_url="$is_protocol://$uuid@$is_addr:$port?encryption=$is_vless_enc_encryption&type=tcp#233boy-$net-$is_addr"
         fi
         ;;
