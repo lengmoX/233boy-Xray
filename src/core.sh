@@ -159,6 +159,9 @@ get_mlkem768() {
 }
 
 get_vless_enc() {
+    [[ ! $is_vless_enc_mode ]] && is_vless_enc_mode=xorpub
+    [[ ! $is_vless_enc_seconds ]] && is_vless_enc_seconds=600s
+    [[ ! $is_vless_enc_rtt ]] && is_vless_enc_rtt=0rtt
     if [[ $is_use_x25519_private ]]; then
         is_tmp_pbk=($($is_core_bin x25519 -i "$is_use_x25519_private" 2>/dev/null | sed 's/.*://'))
         is_private_key=${is_tmp_pbk[0]}
@@ -177,8 +180,27 @@ get_vless_enc() {
         get_mlkem768
         [[ ! $is_mlkem_seed || ! $is_mlkem_client ]] && err "生成 ML-KEM-768 密钥失败, 请更新 $is_core_name core."
     fi
-    is_vless_enc_decryption="mlkem768x25519plus.xorpub.600s.${is_private_key}.${is_mlkem_seed}"
-    is_vless_enc_encryption="mlkem768x25519plus.xorpub.0rtt.${is_public_key}.${is_mlkem_client}"
+    is_vless_enc_decryption="mlkem768x25519plus.${is_vless_enc_mode}.${is_vless_enc_seconds}.${is_private_key}.${is_mlkem_seed}"
+    is_vless_enc_encryption="mlkem768x25519plus.${is_vless_enc_mode}.${is_vless_enc_rtt}.${is_public_key}.${is_mlkem_client}"
+}
+
+parse_vless_enc_decryption() {
+    local enc=$1
+    [[ ! $enc || $enc == 'none' ]] && return
+    IFS='.' read -r -a is_vless_enc_parts <<<"$enc"
+    [[ ${#is_vless_enc_parts[@]} -lt 5 ]] && return
+    [[ ${is_vless_enc_parts[0]} != "mlkem768x25519plus" ]] && return
+    is_vless_enc_mode=${is_vless_enc_parts[1]}
+    is_vless_enc_seconds=${is_vless_enc_parts[2]}
+    if [[ $is_vless_enc_seconds == "0s" ]]; then
+        is_vless_enc_rtt=1rtt
+    else
+        is_vless_enc_rtt=0rtt
+    fi
+    local last_index=$((${#is_vless_enc_parts[@]} - 2))
+    is_use_x25519_private=${is_vless_enc_parts[$last_index]}
+    is_use_mlkem_seed=${is_vless_enc_parts[$last_index + 1]}
+    get_vless_enc
 }
 show_list() {
     PS3=''
@@ -366,10 +388,15 @@ create() {
         [[ $host ]] && is_listen=${is_listen/0.0.0.0/127.0.0.1}
         is_sniffing='sniffing:{enabled:true,destOverride:["http","tls"]}'
         [[ $is_reality ]] && is_sniffing='sniffing:{enabled:true,destOverride:["http","tls"],routeOnly:true}'
-        is_new_json=$(jq '{inbounds:[{tag:"'$is_config_name'",port:'"$port"','"$is_listen"',protocol:"'$is_protocol'",'"$json_str"','"$is_sniffing"'}]}' <<<{})
+        [[ $is_vless_enc ]] && is_sniffing=
+        is_inbound_extra="$json_str"
+        [[ $is_sniffing ]] && is_inbound_extra="$is_inbound_extra,$is_sniffing"
+        is_new_json=$(jq '{inbounds:[{tag:"'$is_config_name'",port:'"$port"','"$is_listen"',protocol:"'$is_protocol'",'"$is_inbound_extra"'}]}' <<<{})
         if [[ $is_dynamic_port ]]; then
             [[ ! $is_dynamic_port_range ]] && get dynamic-port
-            is_new_dynamic_port_json=$(jq '{inbounds:[{tag:"'$is_config_name-link.json'",port:"'$is_dynamic_port_range'",'"$is_listen"',protocol:"vmess",'"$is_stream"','"$is_sniffing"',allocate:{strategy:"random"}}]}' <<<{})
+            is_dynamic_extra="$is_stream"
+            [[ $is_sniffing ]] && is_dynamic_extra="$is_dynamic_extra,$is_sniffing"
+            is_new_dynamic_port_json=$(jq '{inbounds:[{tag:"'$is_config_name-link.json'",port:"'$is_dynamic_port_range'",'"$is_listen"',protocol:"vmess",'"$is_dynamic_extra"',allocate:{strategy:"random"}}]}' <<<{})
         fi
         [[ $is_test_json ]] && return # tmp test
         # only show json, dont save to file.
@@ -1257,6 +1284,23 @@ get() {
         get file $2
         if [[ $is_config_file ]]; then
             is_json_str=$(cat $is_conf_dir/"$is_config_file")
+            is_vless_enc=
+            is_vless_enc_decryption=
+            is_vless_enc_encryption=
+            is_vless_enc_mode=
+            is_vless_enc_seconds=
+            is_vless_enc_rtt=
+            is_use_x25519_private=
+            is_use_mlkem_seed=
+            is_mlkem_seed=
+            is_mlkem_client=
+            is_vless_enc_decryption=$(jq -r '.inbounds[0].settings.decryption // empty' <<<$is_json_str)
+            if [[ $is_vless_enc_decryption && $is_vless_enc_decryption != "none" ]]; then
+                parse_vless_enc_decryption "$is_vless_enc_decryption"
+                [[ $is_vless_enc_encryption ]] && is_vless_enc=1
+            else
+                is_vless_enc_decryption=
+            fi
             is_json_data_base=$(jq '.inbounds[0]|.protocol,.port,(.settings|(.clients[0]|.id,.password),.method,.password,.address,.port,.detour.to,(.accounts[0]|.user,.pass))' <<<$is_json_str)
             [[ $? != 0 ]] && err "无法读取此文件: $is_config_file"
             is_json_data_more=$(jq '.inbounds[0]|.streamSettings|.network,.tcpSettings.header.type,(.kcpSettings|.seed,.header.type),.quicSettings.header.type,.wsSettings.path,.httpSettings.path,.grpcSettings.serviceName,.xhttpSettings.path' <<<$is_json_str)
@@ -1283,6 +1327,7 @@ get() {
             path="${ws_path}${h2_path}${grpc_path}${xhttp_path}"
             host="${ws_host}${h2_host}${grpc_host}${xhttp_host}"
             header_type="${tcp_type}${kcp_type}${quic_type}"
+            [[ $is_vless_enc && $net == 'tcp' && ! $header_type ]] && header_type=none
             if [[ $is_reality == 'reality' ]]; then
                 net=reality
             else
@@ -1303,7 +1348,9 @@ get() {
             fi
             [[ $is_tmp_https_port ]] && is_https_port=$is_tmp_https_port
             [[ $is_client && $host ]] && port=$is_https_port
-            get protocol $is_protocol-$net
+            is_protocol_arg=$is_protocol-$net
+            [[ $is_vless_enc ]] && is_protocol_arg=vless-enc-$net
+            get protocol $is_protocol_arg
         fi
         ;;
     protocol)
@@ -1328,7 +1375,7 @@ get() {
                 is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"none",flow:"xtls-rprx-vision"}]}]}'
             elif [[ $is_vless_enc ]]; then
                 [[ ! $is_vless_enc_decryption || ! $is_vless_enc_encryption ]] && get_vless_enc
-                is_server_id_json='settings:{clients:[{id:"'$uuid'"}],decryption:"'$is_vless_enc_decryption'"}'
+                is_server_id_json='settings:{clients:[{id:"'$uuid'",level:0,email:"love@example.com"}],decryption:"'$is_vless_enc_decryption'"}'
                 is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"'$is_vless_enc_encryption'"}]}]}'
             else
                 is_server_id_json='settings:{clients:[{id:"'$uuid'"}],decryption:"none"}'
@@ -1379,7 +1426,6 @@ get() {
         *tcp* | *reality* | vless-enc*)
             net=tcp
             [[ ! $header_type ]] && header_type=none
-            is_stream='tcpSettings:{header:{type:"'$header_type'"}}'
             if [[ $is_reality ]]; then
                 [[ ! $is_servername ]] && is_servername=$is_random_servername
                 [[ ! $is_private_key ]] && get_pbk
@@ -1387,6 +1433,10 @@ get() {
                 if [[ $is_client ]]; then
                     is_stream='security:"reality",realitySettings:{serverName:"'${is_servername}'",fingerprint:"chrome",publicKey:"'$is_public_key'",shortId:"",spiderX:"/"}'
                 fi
+            elif [[ $is_vless_enc ]]; then
+                is_stream=
+            else
+                is_stream='tcpSettings:{header:{type:"'$header_type'"}}'
             fi
             ;;
         *kcp* | *mkcp)
@@ -1425,7 +1475,11 @@ get() {
             err "无法识别传输协议: $is_config_file"
             ;;
         esac
-        is_stream="streamSettings:{network:\"$net\",$is_stream}"
+        if [[ $is_stream ]]; then
+            is_stream="streamSettings:{network:\"$net\",$is_stream}"
+        else
+            is_stream="streamSettings:{network:\"$net\"}"
+        fi
         json_str="$is_server_id_json,$is_stream"
         ;;
     dynamic-port) # create random dynamic port
@@ -1574,6 +1628,8 @@ info() {
             is_info_show=(0 1 2 3 15 8 16 17 18)
             is_info_str=($is_protocol $is_addr $port $uuid xtls-rprx-vision reality $is_servername "chrome" $is_public_key)
             is_url="$is_protocol://$uuid@$is_addr:$port?encryption=none&security=reality&flow=xtls-rprx-vision&type=tcp&sni=$is_servername&pbk=$is_public_key&fp=chrome#233boy-$net-$is_addr"
+        elif [[ $is_protocol == 'vless' && $is_vless_enc && $net == 'tcp' && $is_vless_enc_encryption ]]; then
+            is_url="$is_protocol://$uuid@$is_addr:$port?encryption=$is_vless_enc_encryption&type=tcp#233boy-$net-$is_addr"
         fi
         ;;
     ss)
