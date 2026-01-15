@@ -1425,8 +1425,8 @@ get() {
                 is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"none",flow:"xtls-rprx-vision"}]}]}'
             elif [[ $is_vless_enc ]]; then
                 [[ ! $is_vless_enc_decryption || ! $is_vless_enc_encryption ]] && get_vless_enc
-                is_server_id_json='settings:{clients:[{id:"'$uuid'",level:0,email:"love@example.com"}],decryption:"'$is_vless_enc_decryption'"}'
-                is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"'$is_vless_enc_encryption'"}]}]}'
+                is_server_id_json='settings:{clients:[{id:"'$uuid'",flow:"xtls-rprx-vision"}],decryption:"'$is_vless_enc_decryption'"}'
+                is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"'$is_vless_enc_encryption'",flow:"xtls-rprx-vision"}]}]}'
             else
                 is_server_id_json='settings:{clients:[{id:"'$uuid'"}],decryption:"none"}'
                 is_client_id_json='settings:{vnext:[{address:"'$is_addr'",port:'"$port"',users:[{id:"'$uuid'",encryption:"none"}]}]}'
@@ -1681,9 +1681,9 @@ info() {
             is_info_str=($is_protocol $is_addr $port $uuid xtls-rprx-vision reality $is_servername "chrome" $is_public_key)
             is_url="$is_protocol://$uuid@$is_addr:$port?encryption=none&security=reality&flow=xtls-rprx-vision&type=tcp&sni=$is_servername&pbk=$is_public_key&fp=chrome#233boy-$net-$is_addr"
         elif [[ $is_protocol == 'vless' && $is_vless_enc && $net == 'tcp' && $is_vless_enc_encryption ]]; then
-            is_info_show=(0 1 2 3 4)
-            is_info_str=($is_protocol $is_addr "$is_tmp_port" $uuid $net)
-            is_url="$is_protocol://$uuid@$is_addr:$port?encryption=$is_vless_enc_encryption&type=tcp#233boy-$net-$is_addr"
+            is_info_show=(0 1 2 3 15 4)
+            is_info_str=($is_protocol $is_addr "$is_tmp_port" $uuid xtls-rprx-vision $net)
+            is_url="$is_protocol://$uuid@$is_addr:$port?encryption=$is_vless_enc_encryption&flow=xtls-rprx-vision&type=tcp#233boy-$net-$is_addr"
         fi
         ;;
     ss)
