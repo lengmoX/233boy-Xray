@@ -127,10 +127,44 @@ get_uuid() {
 
 get_ip() {
     [[ $ip || $is_no_auto_tls || $is_gen || $is_dont_get_ip ]] && return
-    export "$(_wget -4 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip=)" &>/dev/null
-    [[ ! $ip ]] && export "$(_wget -6 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip=)" &>/dev/null
+
+    # Try multiple IP detection services with fallback
+    local services=(
+        "https://one.one.one.one/cdn-cgi/trace|grep ip="
+        "https://ipinfo.io/ip|cat"
+        "https://ifconfig.me/ip|cat"
+        "https://ip.sb|cat"
+    )
+
+    for service in "${services[@]}"; do
+        local url="${service%|*}"
+        local filter="${service#*|}"
+
+        # Try IPv4
+        if [[ -z $ip ]]; then
+            if [[ $filter == "grep ip=" ]]; then
+                export "$(_wget -4 -qO- "$url" | grep ip=)" &>/dev/null
+            else
+                export ip=$(_wget -4 -qO- "$url" | tr -d '[:space:]') &>/dev/null
+            fi
+        fi
+
+        # Try IPv6 if IPv4 failed
+        if [[ -z $ip ]]; then
+            if [[ $filter == "grep ip=" ]]; then
+                export "$(_wget -6 -qO- "$url" | grep ip=)" &>/dev/null
+            else
+                export ip=$(_wget -6 -qO- "$url" | tr -d '[:space:]') &>/dev/null
+            fi
+        fi
+
+        # Break if we got an IP
+        [[ $ip ]] && break
+    done
+
     [[ ! $ip ]] && {
-        err "获取服务器 IP 失败.."
+        warn "获取服务器 IP 失败.."
+        msg "提示: NAT 环境或使用域名绑定时，可以使用 ${green}no-auto-tls${none} 参数跳过 IP 检测."
     }
 }
 

@@ -132,11 +132,13 @@ fix_eol() {
 
 # show help msg
 show_help() {
-    echo -e "Usage: $0 [-f xxx | -l | -p xxx | -v xxx | -h]"
+    echo -e "Usage: $0 [-f xxx | -l | -p xxx | -v xxx | --ip xxx | --skip-ip | -h]"
     echo -e "  -f, --core-file <path>          自定义 $is_core_name 文件路径, e.g., -f /root/${is_core}-linux-64.zip"
     echo -e "  -l, --local-install             本地获取安装脚本, 使用当前目录"
     echo -e "  -p, --proxy <addr>              使用代理下载, e.g., -p http://127.0.0.1:2333"
     echo -e "  -v, --core-version <ver>        自定义 $is_core_name 版本, e.g., -v v1.8.1"
+    echo -e "      --ip <address>              手动指定服务器 IP 地址, e.g., --ip 1.2.3.4"
+    echo -e "      --skip-ip                   跳过 IP 检测 (适用于 NAT 环境)"
     echo -e "  -h, --help                      显示此帮助界面\n"
 
     exit 0
@@ -197,8 +199,39 @@ download() {
 
 # get server ip
 get_ip() {
-    export "$(_wget -4 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip=)" &>/dev/null
-    [[ -z $ip ]] && export "$(_wget -6 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip=)" &>/dev/null
+    # Try multiple IP detection services with fallback
+    local services=(
+        "https://one.one.one.one/cdn-cgi/trace|grep ip="
+        "https://ipinfo.io/ip|cat"
+        "https://ifconfig.me/ip|cat"
+        "https://ip.sb|cat"
+    )
+
+    for service in "${services[@]}"; do
+        local url="${service%|*}"
+        local filter="${service#*|}"
+
+        # Try IPv4
+        if [[ -z $ip ]]; then
+            if [[ $filter == "grep ip=" ]]; then
+                export "$(_wget -4 -qO- "$url" | grep ip=)" &>/dev/null
+            else
+                export ip=$(_wget -4 -qO- "$url" | tr -d '[:space:]') &>/dev/null
+            fi
+        fi
+
+        # Try IPv6 if IPv4 failed
+        if [[ -z $ip ]]; then
+            if [[ $filter == "grep ip=" ]]; then
+                export "$(_wget -6 -qO- "$url" | grep ip=)" &>/dev/null
+            else
+                export ip=$(_wget -6 -qO- "$url" | tr -d '[:space:]') &>/dev/null
+            fi
+        fi
+
+        # Break if we got an IP
+        [[ $ip ]] && break
+    done
 }
 
 # check background tasks status
@@ -274,6 +307,17 @@ pass_args() {
                 err "($1) 缺少必需参数, 正确使用示例: [$1 v1.8.1]"
             }
             is_core_ver=v${2#v}
+            shift 2
+            ;;
+        --skip-ip)
+            is_skip_ip=1
+            shift 1
+            ;;
+        --ip)
+            [[ -z $2 ]] && {
+                err "($1) 缺少必需参数, 正确使用示例: [$1 1.2.3.4]"
+            }
+            export ip=$2
             shift 2
             ;;
         -h | --help)
@@ -356,7 +400,7 @@ main() {
         [[ ! $is_core_file ]] && download core &
         [[ ! $local_install ]] && download sh &
         [[ $jq_not_found ]] && download jq &
-        get_ip
+        [[ ! $is_skip_ip && ! $ip ]] && get_ip
     }
 
     # waiting for background tasks is done
@@ -381,10 +425,11 @@ main() {
         }
     fi
 
-    # get server ip.
+    # get server ip (optional for NAT environments).
     [[ ! $ip ]] && {
-        msg err "获取服务器 IP 失败."
-        exit_and_del_tmpdir
+        msg warn "无法自动获取服务器 IP 地址."
+        msg "提示: NAT 环境或使用域名绑定时，可以跳过 IP 检测."
+        msg "安装将继续，但某些功能可能需要手动配置域名."
     }
 
     # create sh dir...
