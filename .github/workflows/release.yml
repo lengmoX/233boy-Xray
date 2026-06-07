@@ -17,11 +17,11 @@ jobs:
         run: |
           echo "$(cat xray.sh | grep ver=)" >> $GITHUB_ENV
           echo "old=$(git tag | tail -n1)" >> $GITHUB_ENV
-      # - name: test
-      #   if: env.is_sh_ver == env.old 
-      #   run: |
-      #     echo not found new version.
-      #     exit 1
+      - name: test
+        if: env.is_sh_ver == env.old
+        run: |
+          echo not found new version.
+          exit 1
       - name: normalize line endings
         run: find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
       - name: zip
